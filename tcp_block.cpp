@@ -110,8 +110,10 @@ void block_tcppkt(pcap_t* handle, uint8_t* mymac, uint8_t* myip, uint8_t* host_u
 
 		if(memcmp(host_url, http_pkt + indexOfHost + 8, strlen((const char*)host_url)) == 0){
 			printf("Block the this output\n");
-			backward_rstpkt(handle, rcvpkt, IP_len,	TCP_len, HTTP_len);
-			forward_rstpkt(handle, rcvpkt, IP_len, TCP_len, HTTP_len);
+		
+			
+			forward_rstpkt(handle, rcvpkt, IP_len, 20, HTTP_len);
+			backward_finpkt(handle, rcvpkt, IP_len,	20, HTTP_len);
 		}
 	}
 }
@@ -126,9 +128,10 @@ void forward_rstpkt(pcap_t* handle, uint8_t* pkt, int ip_len, int tcp_len, int h
 	// copy received packet to rstpkt ethernet and ip and tcp
 	memcpy(packet, pkt, eth_hdr_len + ip_len + tcp_len);
 	packet_ip->total_length = htons(ip_len + tcp_len);
+	packet_tcp->tcp_len = 0x50;
 
 	// set tos
-	//packet_ip->tos = 0x44;
+	packet_ip->tos = 0x44;
 
 	// set rst flag
 	packet_tcp->flag = 0x14;
@@ -149,7 +152,7 @@ void forward_rstpkt(pcap_t* handle, uint8_t* pkt, int ip_len, int tcp_len, int h
 }
 
 void forward_finpkt(pcap_t* handle, uint8_t* pkt, int ip_len, int tcp_len, int http_len){
-	uint8_t packet[eth_hdr_len + ip_len + tcp_len];
+	uint8_t packet[eth_hdr_len + ip_len + tcp_len + 2];
 	struct pcap_pkthdr* header;
 	uint8_t* rcvpkt;
 	uint32_t seq_num;
@@ -163,7 +166,8 @@ void forward_finpkt(pcap_t* handle, uint8_t* pkt, int ip_len, int tcp_len, int h
 	
 	// copy received packet to rstpkt ethernet and ip and tcp
 	memcpy(packet, pkt, eth_hdr_len + ip_len + tcp_len);
-	packet_ip->total_length = htons(ip_len + tcp_len);
+	packet_ip->total_length = htons(ip_len + tcp_len + 2);
+	packet_tcp->tcp_len = 0x50;
 
 	// set rst flag
 	packet_tcp->flag = 0x11;
@@ -171,17 +175,27 @@ void forward_finpkt(pcap_t* handle, uint8_t* pkt, int ip_len, int tcp_len, int h
 	// set seq
 	packet_tcp->seq_num = htonl(ntohl(rcvpacket_tcp->seq_num) + http_len);
 
+	// set tos
+	packet_ip->tos = 0x44;
+
+	// set window size
+	packet_tcp->window_size = 0;
+
+	// set tcp data
+	packet[eth_hdr_len + ip_len + tcp_len] = 'a';
+	packet[eth_hdr_len + ip_len + tcp_len + 1] = 'b';
+
 	// calculate checksum
 	packet_tcp->checksum = 0;
-	packet_tcp->checksum = htons(tcp_checksum(packet + eth_hdr_len, ip_len, tcp_len, 0));
+	packet_tcp->checksum = htons(tcp_checksum(packet + eth_hdr_len, ip_len, tcp_len, 2));
 	packet_ip->checksum = 0;
 	packet_ip->checksum = htons(ip_checksum(packet + eth_hdr_len, ip_len));
 	
-	pcap_sendpacket(handle, packet, eth_hdr_len + ip_len + tcp_len);
+	pcap_sendpacket(handle, packet, eth_hdr_len + ip_len + tcp_len + 2);
 
 	
 	dest_ip = rcvpacket_ip->dest_ip;
-
+/*
 	while(1){
 		struct IP_HDR* pkt_iphdr;
 		struct TCP_HDR* pkt_tcphdr;
@@ -227,7 +241,7 @@ void forward_finpkt(pcap_t* handle, uint8_t* pkt, int ip_len, int tcp_len, int h
 	packet_ip->checksum = 0;
 	packet_ip->checksum = htons(ip_checksum(packet + eth_hdr_len, ip_len));
 
-	pcap_sendpacket(handle, packet, eth_hdr_len + ip_len + tcp_len);
+	pcap_sendpacket(handle, packet, eth_hdr_len + ip_len + tcp_len);*/
 }
 
 void backward_rstpkt(pcap_t* handle, uint8_t* pkt, int ip_len, int tcp_len, int http_len){
@@ -242,6 +256,7 @@ void backward_rstpkt(pcap_t* handle, uint8_t* pkt, int ip_len, int tcp_len, int 
 	// copy received packet to rstpkt ethernet and ip and tcp
 	memcpy(packet, pkt, eth_hdr_len + ip_len + tcp_len);
 	packet_ip->total_length = htons(ip_len + tcp_len);
+	packet_tcp->tcp_len = 0x50;
 
 	// swap the mac address and ip address and port 
 	memcpy(packet + 6, pkt, 6);
@@ -252,7 +267,7 @@ void backward_rstpkt(pcap_t* handle, uint8_t* pkt, int ip_len, int tcp_len, int 
 	memcpy(packet + eth_hdr_len + ip_len + 2, pkt + eth_hdr_len + ip_len, 2);
 
 	// set tos
-	//packet_ip->tos = 0x44;
+	packet_ip->tos = 0x44;
 
 	// set rst flag
 	packet_tcp->flag = 0x14;
@@ -290,6 +305,13 @@ void backward_finpkt(pcap_t* handle, uint8_t* pkt, int ip_len, int tcp_len, int 
 	// copy received packet to rstpkt ethernet and ip and tcp
 	memcpy(packet, pkt, eth_hdr_len + ip_len + tcp_len);
 	packet_ip->total_length = htons(ip_len + tcp_len + 2);
+	packet_tcp->tcp_len = 0x50;
+
+	// set tos
+	packet_ip->tos = 0x44;
+
+	// set window size
+	packet_tcp->window_size = 0;
 
 	// swap the mac address and ip address and port 
 	memcpy(packet + 6, pkt, 6);
@@ -321,7 +343,7 @@ void backward_finpkt(pcap_t* handle, uint8_t* pkt, int ip_len, int tcp_len, int 
 	dest_ip = rcvpacket_ip->dest_ip;
 	printf("%x\n", dest_ip);
 	
-	while(1){
+	/*while(1){
 		struct IP_HDR* pkt_iphdr;
 		struct TCP_HDR* pkt_tcphdr;
 		pcap_next_ex(handle, &header, (const u_char **)&rcvpkt);
@@ -368,7 +390,7 @@ void backward_finpkt(pcap_t* handle, uint8_t* pkt, int ip_len, int tcp_len, int 
 	packet_ip->checksum = htons(ip_checksum(packet + eth_hdr_len, ip_len));
 
 
-	pcap_sendpacket(handle, packet, eth_hdr_len + ip_len + tcp_len);
+	pcap_sendpacket(handle, packet, eth_hdr_len + ip_len + tcp_len);*/
 }
 
 uint16_t tcp_checksum(uint8_t* ip_packet, int ip_len, int tcp_len, int http_len){
